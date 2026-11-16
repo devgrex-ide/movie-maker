@@ -1,5 +1,6 @@
 node_modules/
 data/
+keystore/
 dist/
 *.wav
 .DS_Store

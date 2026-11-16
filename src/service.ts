@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ModelAdapters } from "./adapters.js";
 import { appendAudit } from "./audit.js";
 import { evaluateConsentGate, type GateConsent } from "./consent-gate.js";
-import { DISCLOSURE_LABEL, MAX_TAKE_ATTEMPTS, PICTURE_FLOOR_MS } from "./constants.js";
+import { DISCLOSURE_LABEL, MAX_PROJECTS, MAX_STORIES_PER_PROJECT, MAX_STORY_CHARS, MAX_TAKE_ATTEMPTS, PICTURE_FLOOR_MS } from "./constants.js";
 import { openDatabase, type Db } from "./db.js";
 import { assertPictureRuntime, compileShotList } from "./duration.js";
 import { DurationError } from "./duration.js";
@@ -216,6 +216,10 @@ export class MovieService {
   }
 
   createProject(title = ""): string {
+    const existing = this.db.prepare(`SELECT COUNT(*) AS n FROM project`).get() as { n: number };
+    if ((existing.n ?? 0) >= MAX_PROJECTS) {
+      throw new ServiceError(409, [], `This installation holds at most ${MAX_PROJECTS} projects.`);
+    }
     const id = randomUUID();
     const at = isoNow(this.now());
     this.db.prepare(
@@ -467,6 +471,13 @@ export class MovieService {
     const project = this.mustProject(projectId);
     const raw = text.trim();
     if (raw.length < 8) throw new ServiceError(400, [], "Write a short story. A few sentences are enough.");
+    if (raw.length > MAX_STORY_CHARS) {
+      throw new ServiceError(400, [], `A short story can be at most ${MAX_STORY_CHARS} characters.`);
+    }
+    const priorStories = this.db.prepare(`SELECT COUNT(*) AS n FROM short_story WHERE project_id = ?`).get(projectId) as { n: number };
+    if ((priorStories.n ?? 0) >= MAX_STORIES_PER_PROJECT) {
+      throw new ServiceError(409, [], `This project holds at most ${MAX_STORIES_PER_PROJECT} short stories.`);
+    }
     if (!project.title.trim()) throw new ServiceError(400, [], "Name the picture before submitting the story.");
     const ready = this.latestPackage(projectId);
     if (ready?.status === "ready") {
@@ -1736,6 +1747,8 @@ function toGateConsent(row: ConsentRow): GateConsent {
 
 export function createMovieService(options: {
   dataDir: string;
+  /** Actor keys. Must not be the directory that holds app.sqlite. */
+  keysDir: string;
   now?: () => Date;
   adapters?: Partial<ModelAdapters>;
 }): MovieService {
@@ -1747,5 +1760,6 @@ export function createMovieService(options: {
     speech: options.adapters?.speech ?? new LocalSpeechAdapter(),
     score: options.adapters?.score ?? new LocalScoreAdapter(),
   };
-  return new MovieService(db, options.dataDir, new Vault(path.join(options.dataDir, "vault")), adapters, options.now ?? (() => new Date()));
+  const vault = new Vault(path.join(options.dataDir, "vault"), options.keysDir);
+  return new MovieService(db, options.dataDir, vault, adapters, options.now ?? (() => new Date()));
 }

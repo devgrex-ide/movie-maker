@@ -15,11 +15,11 @@ npm start
 
 Open http://127.0.0.1:4173
 
-Put your name in the header. That name is the principal on verification, consent, identity review, the cut check, and export.
+Verification, consent, identity review, the cut check, and export are recorded as the signed-in Cursor viewer. On this machine, before the app is published, that viewer is the simulated local person and the header says so. A typed name is not the reviewer.
 
-1. Name the picture and submit a short story.
+1. Name the picture and submit a short story. A short story is at most 12,000 characters, and an installation holds at most 24 projects.
 2. Read the package. Export is still refused.
-3. On Consent, record an adult, the in-person verification, the document location, and the scope. Activation stores the reference capture.
+3. On Consent, register an adult. Recording the in-person verification is a separate action: choose pass or fail. Consent stays inactive until a pass exists. Then record the document location and the scope. Activation stores the reference capture. The app does not check an ID image.
 4. Generate picture. The worker renders a take per shot.
 5. Identity: accept or reject each take beside its reference. A accepts, R rejects.
 6. Cut check: play the timeline. Pass is legal only at 30 minutes with consent and identity still holding.
@@ -36,7 +36,7 @@ The local adapters are what actually run on this machine:
 - **Story.** A deterministic writer turns the short story and the anonymous cast slots into the full story, script, screenplay, dialogue, scenes, and continuity bible. Public-figure names become fictional characters. A child in the source stops the job before any image.
 - **Shots.** The duration compiler, not the writer, builds the shot list. No shot is longer than the measured reliable length (6 seconds for this stand-in). The targets sum to at least 30 minutes.
 - **Picture.** Each take is an SVG slate: real duration, consent id, seed, and an identity mark derived from the reference token. It is not a photograph and not a reconstructed face.
-- **Reference.** Capture plates are encrypted per actor. They are geometric stand-in plates, not a face dataset. The app database does not store the plate bytes. Revocation deletes the actor key.
+- **Reference.** Capture plates are encrypted per actor with AES-256-GCM. The ciphertext lives under `data/vault`. Each actor key lives in `keystore/`, outside the application data directory, and is not stored in `app.sqlite`. The plates are geometric stand-ins, not a face dataset. Revocation deletes that key and the ciphertext, so the plates cannot be read.
 - **Speech.** A local oscillator speaks the line from the text. It is not a voice clone.
 - **Score and mix.** An original drone is mixed with the dialogue into a stereo file whose duration matches the picture. ffmpeg writes that file at export.
 - **Identity hint.** Distance is a token match. It is a hint on the review screen. It does not accept a take.

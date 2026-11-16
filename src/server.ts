@@ -2,19 +2,39 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getIdentity } from "../cursor/identity.js";
+import { MAX_JSON_BYTES } from "./constants.js";
 import { ServiceError } from "./errors.js";
 import { createMovieService, type ConsentDraft } from "./service.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(root, "public");
 const port = Number(process.env.PORT ?? 4173);
-const service = createMovieService({ dataDir: path.join(process.cwd(), "data") });
+const service = createMovieService({
+  dataDir: path.join(process.cwd(), "data"),
+  keysDir: path.join(process.cwd(), "keystore"),
+});
 service.ensureWorkspace();
+
+class PayloadTooLarge extends Error {}
 
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const principal = String(req.headers["x-principal"] ?? "");
+    let principal = "";
+    if (url.pathname.startsWith("/api/")) {
+      const identity = await getIdentity(req);
+      if (!identity.verified || identity.kind !== "person") {
+        return json(res, 401, { ok: false, message: "A signed-in person is required for this action." });
+      }
+      principal = identity.name.trim() || identity.email.trim();
+      if (!principal) {
+        return json(res, 401, { ok: false, message: "The signed-in viewer has no name on this session." });
+      }
+      if (req.method === "GET" && url.pathname === "/api/me") {
+        return json(res, 200, { name: principal, simulated: identity.simulated });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/workspace") {
       return json(res, 200, { projectId: service.ensureWorkspace() });
     }
@@ -83,8 +103,10 @@ const server = http.createServer(async (req, res) => {
     const verify = url.pathname.match(/^\/api\/actors\/([^/]+)\/verify$/);
     if (verify && req.method === "POST") {
       const body = await readJson(req);
-      const result = body.result === "fail" ? "fail" : "pass";
-      service.verifyActor(decodeURIComponent(verify[1] ?? ""), principal, result);
+      if (body.result !== "pass" && body.result !== "fail") {
+        return json(res, 400, { ok: false, message: "Verification result must be pass or fail. Registering an actor does not record a pass." });
+      }
+      service.verifyActor(decodeURIComponent(verify[1] ?? ""), principal, body.result);
       return json(res, 200, { ok: true });
     }
 
@@ -180,6 +202,10 @@ const server = http.createServer(async (req, res) => {
       json(res, error.status, { ok: false, reasons: error.reasons, message: error.message });
       return;
     }
+    if (error instanceof PayloadTooLarge) {
+      json(res, 413, { ok: false, message: "The request body is larger than 256 KB." });
+      return;
+    }
     if (error instanceof SyntaxError) {
       json(res, 400, { ok: false, message: "The request body was not JSON." });
       return;
@@ -194,13 +220,21 @@ server.listen(port, () => {
 });
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
   res.end(JSON.stringify(body));
 }
 
 async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const declared = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) throw new PayloadTooLarge();
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > MAX_JSON_BYTES) throw new PayloadTooLarge();
+    chunks.push(buf);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw.trim()) return {};
   const parsed = JSON.parse(raw) as unknown;
@@ -225,6 +259,9 @@ function serveStatic(pathname: string, res: http.ServerResponse): void {
     ".js": "text/javascript; charset=utf-8",
     ".svg": "image/svg+xml",
   };
-  res.writeHead(200, { "content-type": types[path.extname(file)] ?? "application/octet-stream" });
+  res.writeHead(200, {
+    "content-type": types[path.extname(file)] ?? "application/octet-stream",
+    "cache-control": "no-store",
+  });
   fs.createReadStream(file).pipe(res);
 }

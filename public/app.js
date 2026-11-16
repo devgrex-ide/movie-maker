@@ -54,18 +54,16 @@ const state = {
   timeline: null,
   poll: 0,
   generating: false,
+  actorId: "",
+  form: {},
   stalls: 0,
   lastRendered: -1,
 };
 
 const stage = document.querySelector("#stage");
 const titleInput = document.querySelector("#title");
-const principalInput = document.querySelector("#principal");
+const viewerLabel = document.querySelector("#viewer");
 
-principalInput.value = localStorage.getItem("movie-maker-principal") ?? "";
-principalInput.addEventListener("change", () => {
-  localStorage.setItem("movie-maker-principal", principalInput.value.trim());
-});
 titleInput.addEventListener("change", async () => {
   if (!state.projectId || !titleInput.value.trim() || state.data?.project?.titleLocked) return;
   try {
@@ -79,6 +77,10 @@ titleInput.addEventListener("change", async () => {
 
 document.body.addEventListener("input", (event) => {
   if (event.target.id === "story") state.draft = event.target.value;
+  rememberField(event.target);
+});
+document.body.addEventListener("change", (event) => {
+  rememberField(event.target);
 });
 
 document.body.addEventListener("click", (event) => {
@@ -114,6 +116,8 @@ document.addEventListener("keydown", (event) => {
 boot();
 
 async function boot() {
+  const me = await api("/api/me");
+  viewerLabel.textContent = me.simulated ? `${me.name} · simulated locally` : me.name;
   const workspace = await api("/api/workspace");
   state.projectId = workspace.projectId;
   await refresh();
@@ -147,7 +151,16 @@ function paintMeter() {
   document.querySelector("#meter-fill").style.width = `${Math.min(100, (picture / floor) * 100)}%`;
 }
 
+function snapshotConsent() {
+  if (state.view !== "consent") return;
+  for (const el of document.querySelectorAll("#stage input, #stage select, #stage textarea")) {
+    if (!el.id) continue;
+    state.form[el.id] = el.type === "checkbox" ? el.checked : el.value;
+  }
+}
+
 async function handle(action) {
+  snapshotConsent();
   state.error = "";
   state.notice = "";
   try {
@@ -169,8 +182,7 @@ async function handle(action) {
       state.projectId = created.projectId;
       state.view = "story";
     }
-    if (action === "consent") {
-      await saveTitle();
+    if (action === "register-actor") {
       const actor = await api("/api/actors", {
         method: "POST",
         body: {
@@ -178,11 +190,25 @@ async function handle(action) {
           dob: value("#dob"),
         },
       });
-      await api(`/api/actors/${actor.actorId}/verify`, { method: "POST", body: { result: "pass" } });
+      state.actorId = actor.actorId;
+      state.notice = "Adult registered. Verification is a separate record. Nothing was marked passed.";
+    }
+    if (action === "record-verification") {
+      const actorId = value("#verify-actor") || state.actorId;
+      const result = value("#verify-result");
+      if (result !== "pass" && result !== "fail") throw new Error("Choose pass or fail. Verification is not recorded until you do.");
+      await api(`/api/actors/${actorId}/verify`, { method: "POST", body: { result } });
+      state.notice = result === "pass"
+        ? "In-person verification recorded as pass. Consent is still a separate step."
+        : "In-person verification recorded as fail. Consent cannot become active.";
+    }
+    if (action === "activate-consent") {
+      await saveTitle();
+      const actorId = value("#consent-actor") || state.actorId;
       await api(`/api/projects/${state.projectId}/consents`, {
         method: "POST",
         body: {
-          actorId: actor.actorId,
+          actorId,
           slotIndex: Number(value("#slot-index") || 0),
           documentRef: value("#document-ref"),
           territories: value("#territories"),
@@ -202,7 +228,7 @@ async function handle(action) {
           allowSublicense: false,
         },
       });
-      state.notice = "Verification passed, the written consent is active, and the reference capture is stored under that consent.";
+      state.notice = "Written consent is active and the reference capture is stored under that consent.";
     }
     if (action === "revoke") {
       const id = document.querySelector("#revoke-id").value;
@@ -242,6 +268,7 @@ async function handle(action) {
     if (action === "play") togglePlay();
     await refresh();
   } catch (error) {
+    snapshotConsent();
     state.error = error.message || "That action failed.";
     render();
   }
@@ -330,33 +357,55 @@ function packageView(data) {
   </section>`;
 }
 
+function rememberField(el) {
+  if (!el?.id || state.view !== "consent") return;
+  state.form[el.id] = el.type === "checkbox" ? el.checked : el.value;
+}
+
+function field(id, fallback) {
+  return Object.prototype.hasOwnProperty.call(state.form, id) ? state.form[id] : fallback;
+}
+
 function consentView(data) {
   const start = day(0);
   const end = day(365);
+  const box = (id) => (field(id, false) ? "checked" : "");
+  const verifyResult = field("verify-result", "");
   return `<section class="panel">
     <h2 class="lede">Consent is a record the actor can read.</h2>
     <p class="sub">In person, a reviewer confirms a government ID and the adult, then records the result. The ID image is not stored. Activation writes a reference capture under this consent. Training stays off. Nobody can bypass the gate.</p>
     <div class="form-grid">
-      <label>Legal name<input id="legal-name" name="legal-name" type="text" autocomplete="name" placeholder="Legal name" /></label>
-      <label>Date of birth<input id="dob" type="date" value="1990-01-15" /></label>
-      <label class="wide">Where the signed document lives<input id="document-ref" type="text" placeholder="Counsel packet, production safe" /></label>
-      <label>Territories<input id="territories" type="text" value="United States" /></label>
-      <label>Cast slot<input id="slot-index" type="number" min="0" max="${Math.max(0, data.slots.length - 1)}" value="0" /></label>
-      <label>Term start<input id="term-start" type="date" value="${start}" /></label>
-      <label>Term end<input id="term-end" type="date" value="${end}" /></label>
-      <label>Maximum runtime (minutes)<input id="max-runtime" type="number" min="30" value="90" /></label>
-      <label>Trailer cap (seconds)<input id="trailer-max" type="number" min="0" value="0" /></label>
-      <label class="check"><input id="allow-violence" type="checkbox" /> Violence</label>
-      <label class="check"><input id="allow-stunts" type="checkbox" /> Stunts</label>
-      <label class="check"><input id="allow-nudity" type="checkbox" /> Nudity, default denied</label>
-      <label class="check"><input id="allow-voice" type="checkbox" /> Actor voice may be synthesized</label>
-      <label class="check"><input id="allow-trailers" type="checkbox" /> Trailers</label>
-      <label class="check"><input id="allow-stills" type="checkbox" /> Stills</label>
-      <label class="check"><input id="allow-marketing" type="checkbox" /> Marketing</label>
-      <label class="check"><input id="likeness-approval" type="checkbox" /> Actor must approve the finished likeness</label>
+      <label>Legal name<input id="legal-name" name="legal-name" type="text" autocomplete="name" placeholder="Legal name" value="${esc(field("legal-name", ""))}" /></label>
+      <label>Date of birth<input id="dob" type="date" value="${esc(field("dob", "1990-01-15"))}" /></label>
+      <label class="wide">Where the signed document lives<input id="document-ref" type="text" placeholder="Counsel packet, production safe" value="${esc(field("document-ref", ""))}" /></label>
+      <label>Territories<input id="territories" type="text" value="${esc(field("territories", "United States"))}" /></label>
+      <label>Cast slot<input id="slot-index" type="number" min="0" max="${Math.max(0, data.slots.length - 1)}" value="${esc(field("slot-index", "0"))}" /></label>
+      <label>Term start<input id="term-start" type="date" value="${esc(field("term-start", start))}" /></label>
+      <label>Term end<input id="term-end" type="date" value="${esc(field("term-end", end))}" /></label>
+      <label>Maximum runtime (minutes)<input id="max-runtime" type="number" min="30" value="${esc(field("max-runtime", "90"))}" /></label>
+      <label>Trailer cap (seconds)<input id="trailer-max" type="number" min="0" value="${esc(field("trailer-max", "0"))}" /></label>
+      <label class="check"><input id="allow-violence" type="checkbox" ${box("allow-violence")} /> Violence</label>
+      <label class="check"><input id="allow-stunts" type="checkbox" ${box("allow-stunts")} /> Stunts</label>
+      <label class="check"><input id="allow-nudity" type="checkbox" ${box("allow-nudity")} /> Nudity, default denied</label>
+      <label class="check"><input id="allow-voice" type="checkbox" ${box("allow-voice")} /> Actor voice may be synthesized</label>
+      <label class="check"><input id="allow-trailers" type="checkbox" ${box("allow-trailers")} /> Trailers</label>
+      <label class="check"><input id="allow-stills" type="checkbox" ${box("allow-stills")} /> Stills</label>
+      <label class="check"><input id="allow-marketing" type="checkbox" ${box("allow-marketing")} /> Marketing</label>
+      <label class="check"><input id="likeness-approval" type="checkbox" ${box("likeness-approval")} /> Actor must approve the finished likeness</label>
     </div>
-    <p class="locked">Training denied. Sublicensing denied. Both stay off.</p>
-    <div class="actions"><button class="primary" data-action="consent">Verify adult and activate consent</button></div>
+    <p class="locked">Training denied. Sublicensing denied. Both stay off. The app does not check an ID image.</p>
+    <div class="actions">
+      <button class="primary" data-action="register-actor">Register adult</button>
+    </div>
+    <div class="row">
+      <label>Actor<select id="verify-actor">${actorOptions(state.actorId)}</select></label>
+      <label>In-person result<select id="verify-result"><option value="">Choose a result</option><option value="pass"${verifyResult === "pass" ? " selected" : ""}>Pass</option><option value="fail"${verifyResult === "fail" ? " selected" : ""}>Fail</option></select></label>
+      <button data-action="record-verification">Record verification</button>
+    </div>
+    <div class="row">
+      <label>Consent for<select id="consent-actor">${actorOptions(state.actorId)}</select></label>
+      <button class="primary" data-action="activate-consent">Activate consent</button>
+    </div>
     <div class="cards">${data.consents.map(consentCard).join("") || `<article class="card"><h3>No consent yet</h3><p>Export stays blocked until one is active.</p></article>`}</div>
     ${data.consents.some((consent) => consent.status === "active") ? `<div class="row">
       <label>Active consent<select id="revoke-id">${data.consents.filter((consent) => consent.status === "active").map((consent) => `<option value="${esc(consent.id)}">${esc(consent.id.slice(0, 8))} · slot</option>`).join("")}</select></label>
@@ -364,6 +413,14 @@ function consentView(data) {
       <button class="danger" data-action="revoke">Revoke</button>
     </div>` : ""}
   </section>`;
+}
+
+function actorOptions(selected) {
+  const actors = state.data?.actors ?? [];
+  if (!actors.length) return `<option value="">Register an adult first</option>`;
+  return actors
+    .map((actor) => `<option value="${esc(actor.id)}"${actor.id === selected ? " selected" : ""}>${esc(actor.legalName)} · ${esc(actor.status)}${actor.verification ? ` · ${esc(actor.verification)}` : ""}</option>`)
+    .join("");
 }
 
 function consentCard(consent) {
@@ -513,7 +570,7 @@ async function loadPlates() {
   if (!current) return;
   for (const packId of current.packIds) {
     for (const view of ["front", "three-quarter", "profile"]) {
-      const response = await fetch(`/api/packs/${packId}/plates/${encodeURIComponent(view)}`, { headers: headers() });
+      const response = await fetch(`/api/packs/${packId}/plates/${encodeURIComponent(view)}`);
       if (!response.ok) continue;
       const blob = await response.blob();
       state.plates.push(URL.createObjectURL(blob));
@@ -534,7 +591,7 @@ function reasonText(reason) {
 async function api(path, options = {}) {
   const response = await fetch(path, {
     method: options.method ?? "GET",
-    headers: { "content-type": "application/json", ...headers() },
+    headers: { "content-type": "application/json" },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
@@ -545,10 +602,6 @@ async function api(path, options = {}) {
     throw error;
   }
   return data;
-}
-
-function headers() {
-  return { "x-principal": principalInput.value.trim() };
 }
 
 async function saveTitle() {

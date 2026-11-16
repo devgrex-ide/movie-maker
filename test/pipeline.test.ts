@@ -66,7 +66,7 @@ test("a short story becomes a 30 minute master, and revocation blocks the next e
     assert.ok(manifest.pictureMs >= PICTURE_FLOOR_MS);
     assert.ok(manifest.takes.every((take) => take.consentIds.includes(consentId)));
     const after = box.service.projectView(projectId);
-    const mixPath = `${box.dir}/exports/${shipped.exportId}/mix.wav`;
+    const mixPath = `${box.dataDir}/exports/${shipped.exportId}/mix.wav`;
     assert.ok(probeDurationMs(mixPath) + 1500 >= PICTURE_FLOOR_MS);
     assert.equal(after.export?.status, "shipped");
 

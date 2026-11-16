@@ -46,7 +46,7 @@ test("a story that needs a minor does not generate images", () => {
     assert.equal(renderCalls, 0);
     assert.equal(box.renders.count, 0);
     assert.equal(box.service.imageCount(projectId), 0);
-    assert.equal(fs.existsSync(path.join(box.dir, "takes")), false);
+    assert.equal(fs.existsSync(path.join(box.dataDir, "takes")), false);
     assert.throws(() => box.service.schedule(projectId, "Dev Reviewer"), /minor|cannot be shot/);
     const view = box.service.projectView(projectId);
     assert.equal(view.package?.status, "blocked_minor");

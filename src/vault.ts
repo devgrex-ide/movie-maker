@@ -7,13 +7,18 @@ import { identityPlates } from "./local/mark.js";
 const VIEWS = ["front", "three-quarter", "profile"] as const;
 
 /**
- * Reference media lives here, encrypted, apart from the application database
- * and apart from finished takes. Each actor has a key. Revocation deletes it.
- * Decrypted bytes exist only inside a grant and are wiped when the grant ends.
+ * Ciphertext lives in the object store. Keys live in a different directory,
+ * not beside the application database. Revocation deletes the key and the
+ * ciphertext. Decrypted bytes exist only inside a grant and are wiped when it ends.
  */
 export class Vault {
-  constructor(private readonly root: string) {
-    fs.mkdirSync(root, { recursive: true });
+  constructor(
+    private readonly objectsDir: string,
+    private readonly keysDir: string,
+  ) {
+    fs.mkdirSync(objectsDir, { recursive: true });
+    fs.mkdirSync(keysDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(keysDir, 0o700);
   }
 
   capture(input: {
@@ -76,10 +81,12 @@ export class Vault {
     return decrypt(key, fs.readFileSync(file));
   }
 
-  /** Destroys the actor key and deletes ciphertext. Backups of the key are not kept here. */
+  /** Deletes the key and the ciphertext. Without the key the plates cannot be read. */
   destroyActor(actorId: string): void {
-    const dir = path.join(this.root, actorId);
-    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    const keyDir = path.join(this.keysDir, actorId);
+    const objectDir = path.join(this.objectsDir, actorId);
+    if (fs.existsSync(keyDir)) fs.rmSync(keyDir, { recursive: true, force: true });
+    if (fs.existsSync(objectDir)) fs.rmSync(objectDir, { recursive: true, force: true });
   }
 
   removePack(actorId: string, packId: string): void {
@@ -95,7 +102,7 @@ export class Vault {
     const existing = this.readKey(actorId);
     if (existing) return existing;
     const key = randomBytes(32);
-    fs.mkdirSync(path.join(this.root, actorId), { recursive: true });
+    fs.mkdirSync(path.join(this.keysDir, actorId), { recursive: true, mode: 0o700 });
     fs.writeFileSync(this.keyPath(actorId), key, { mode: 0o600 });
     return key;
   }
@@ -109,11 +116,11 @@ export class Vault {
   }
 
   private keyPath(actorId: string): string {
-    return path.join(this.root, actorId, "key");
+    return path.join(this.keysDir, actorId, "key");
   }
 
   private packDir(actorId: string, packId: string): string {
-    return path.join(this.root, actorId, packId);
+    return path.join(this.objectsDir, actorId, packId);
   }
 }
 

@@ -7,6 +7,8 @@ import type { RenderedTake, RenderTakeInput } from "../src/types.js";
 
 export interface Harness {
   dir: string;
+  dataDir: string;
+  keysDir: string;
   service: MovieService;
   renders: { count: number };
   now: Date;
@@ -28,13 +30,18 @@ export function harness(adapters?: Partial<ModelAdapters>): Harness {
         },
       }
     : undefined;
+  const dataDir = path.join(dir, "data");
+  const keysDir = path.join(dir, "keystore");
   const service = createMovieService({
-    dataDir: dir,
+    dataDir,
+    keysDir,
     now: () => now,
     adapters: { ...adapters, ...(counting ? { video: counting } : {}) },
   });
   return {
     dir,
+    dataDir,
+    keysDir,
     service,
     renders,
     get now() {
