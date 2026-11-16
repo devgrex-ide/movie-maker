@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>movie-maker</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="aperture" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">Invite-only production</p>
+          <h1>movie-maker</h1>
+        </div>
+      </div>
+      <label class="title-edit">
+        <span>Picture title</span>
+        <input id="title" type="text" maxlength="80" placeholder="Name the picture" />
+      </label>
+      <div class="principal">
+        <span>Signed-in viewer</span>
+        <p id="viewer">…</p>
+      </div>
+      <div class="meter" id="meter">
+        <span>Picture</span>
+        <strong id="meter-clock">0:00</strong>
+        <small>/ 30:00</small>
+        <div class="meter-track"><div id="meter-fill"></div></div>
+      </div>
+    </header>
+    <div class="shell">
+      <nav>
+        <button type="button" data-view="story">Story</button>
+        <button type="button" data-view="package">Package</button>
+        <button type="button" data-view="consent">Consent</button>
+        <button type="button" data-view="identity">Identity</button>
+        <button type="button" data-view="cut">Cut check</button>
+        <button type="button" data-view="export">Export</button>
+        <p class="nav-note">Style is stylized for this release. Live action waits on a calibration this build does not claim.</p>
+      </nav>
+      <main id="stage"></main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
